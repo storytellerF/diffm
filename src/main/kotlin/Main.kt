@@ -100,6 +100,8 @@ fun App() {
     }
     val generator by rememberUpdatedState(DiffRowGenerator.create()
         .mergeOriginalRevised(true)
+        .showInlineDiffs(true)
+        .inlineDiffByWord(false)
         .oldTag { f: Boolean? -> if (f == true) """<annotation color="red">""" else "</annotation>" } //introduce markdown style for strikethrough
         .newTag { f: Boolean? -> if (f == true) """<annotation color="green">""" else "</annotation>" } //introduce markdown style for bold
         .build())
@@ -124,7 +126,7 @@ fun App() {
     MaterialTheme {
         Column {
             Button(onClick = {
-                config = Json.decodeFromString<Config>(File("1.diffm").readText())
+                config = Json.decodeFromString<Config>(File("2.diffm").readText())
             }) {
                 Text("Reload")
             }
@@ -189,19 +191,17 @@ private fun parseDiffTree(
     println(rightOnly)
     return (common + firstOnly + rightOnly).map { selector ->
         val diff = DiffUtils.diff(readFileContent(first, selector), readFileContent(last, selector), null)
-        selector to diff.deltas.map { delta ->
-            if (delta.type == DeltaType.EQUAL) {
-                Result(DeltaRow(delta, emptyList(), emptyList()))
-            } else {
-                val diffRows = generator.generateDiffRows(delta.source.lines, delta.target.lines)
-                Result(
-                    DeltaRow(delta, diffRows.map {
-                        parse(it.oldLine)
-                    }, diffRows.map {
-                        parse(it.newLine)
-                    }),
-                )
-            }
+        selector to diff.deltas.filter {
+            it.type != DeltaType.EQUAL
+        }.map { delta ->
+            val diffRows = generator.generateDiffRows(delta.source.lines, delta.target.lines)
+            Result(
+                DeltaRow(delta, diffRows.map {
+                    parse(it.oldLine)
+                }, diffRows.map {
+                    parse(it.newLine)
+                })
+            )
         }
     }.filter { it.second.isNotEmpty() }
 }
@@ -227,20 +227,19 @@ val annotationRegex = Regex("""<annotation color="(\w+)">([\w\W]*?)</annotation>
 
 fun parse(text: String): DiffDecoration {
     val annotations = mutableListOf<Range<String>>()
-    return DiffDecoration(text.loop {
+    return DiffDecoration(StringBuilder(text).loop {
         val result = annotationRegex.find(it)
         if (result != null) {
             val start = result.range.first
+            val end = result.range.last + 1
             val color = result.groupValues[1]
             val content = result.groupValues[2]
             annotations.add(Range(color, start, start + content.length))
-            StringBuilder(it).apply {
-                replace(start, result.range.last, content)
-            }.toString()
+            it.replace(start, end, content)
         } else {
             null
         }
-    }, annotations)
+    }.toString(), annotations)
 }
 
 fun <T : Any> T.loop(block: (T) -> T?): T {
